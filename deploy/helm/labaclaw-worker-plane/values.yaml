@@ -1,0 +1,37 @@
+fullnameOverride: labaclaw-worker-plane
+
+image:
+  repository: ghcr.io/nauron-ai/labaclaw-worker-plane
+  tag: latest
+  pullPolicy: IfNotPresent
+
+workerImage:
+  repository: ghcr.io/nauron-ai/labaclaw-worker-plane
+  tag: latest
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: true
+  name: labaclaw-worker-plane
+  imagePullSecrets: []
+
+workerPlane:
+  namespace: labaclaw-workers
+  redpanda:
+    brokers: "redpanda.platform.svc.cluster.local:9092"
+    commandTopic: agent.command.v1
+    eventTopic: agent.event.v1
+    heartbeatTopic: agent.heartbeat.v1
+  rustfs:
+    endpoint: http://shared-rustfs-svc.platform.svc.cluster.local:9000
+    bucket: laba-artifacts
+    prefix: labaclaw
+  secrets:
+    runtimeSecretName: labaclaw-worker-plane-runtime
+
+resources: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

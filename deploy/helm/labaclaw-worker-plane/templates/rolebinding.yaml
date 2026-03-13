@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "labaclaw-worker-plane.name" . }}
+  namespace: {{ .Values.workerPlane.namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "labaclaw-worker-plane.serviceAccountName" . }}
+    namespace: {{ .Values.workerPlane.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "labaclaw-worker-plane.name" . }}
+

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "labaclaw-worker-plane.name" . }}
+  namespace: {{ .Values.workerPlane.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "labaclaw-worker-plane.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "labaclaw-worker-plane.name" . }}
+    spec:
+      serviceAccountName: {{ include "labaclaw-worker-plane.serviceAccountName" . }}
+{{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+{{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+{{- end }}
+{{- end }}
+      containers:
+        - name: agent-factory
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - serve
+          env:
+            - name: LABACLAW_WORKER_PLANE_NAMESPACE
+              value: {{ .Values.workerPlane.namespace | quote }}
+            - name: LABACLAW_WORKER_IMAGE_REPOSITORY
+              value: {{ .Values.workerImage.repository | quote }}
+            - name: LABACLAW_WORKER_IMAGE_TAG
+              value: {{ .Values.workerImage.tag | quote }}
+            - name: LABACLAW_WORKER_PLANE_REDPANDA_BROKERS
+              value: {{ .Values.workerPlane.redpanda.brokers | quote }}
+            - name: LABACLAW_WORKER_PLANE_COMMAND_TOPIC
+              value: {{ .Values.workerPlane.redpanda.commandTopic | quote }}
+            - name: LABACLAW_WORKER_PLANE_EVENT_TOPIC
+              value: {{ .Values.workerPlane.redpanda.eventTopic | quote }}
+            - name: LABACLAW_WORKER_PLANE_HEARTBEAT_TOPIC
+              value: {{ .Values.workerPlane.redpanda.heartbeatTopic | quote }}
+            - name: LABACLAW_WORKER_PLANE_RUNTIME_SECRET_NAME
+              value: {{ .Values.workerPlane.secrets.runtimeSecretName | quote }}
+            - name: LABACLAW_RUSTFS_ENDPOINT
+              value: {{ .Values.workerPlane.rustfs.endpoint | quote }}
+            - name: LABACLAW_RUSTFS_BUCKET
+              value: {{ .Values.workerPlane.rustfs.bucket | quote }}
+            - name: LABACLAW_RUSTFS_PREFIX
+              value: {{ .Values.workerPlane.rustfs.prefix | quote }}
+            - name: LABACLAW_RUSTFS_REGION
+              value: "us-east-1"
+          envFrom:
+            - secretRef:
+                name: {{ .Values.workerPlane.secrets.runtimeSecretName }}
+{{- with .Values.resources }}
+          resources:
+{{ toYaml . | indent 12 }}
+{{- end }}
+{{- with .Values.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+{{- end }}
+{{- with .Values.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+{{- end }}
