@@ -24,6 +24,8 @@ spec:
         - name: agent-factory
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /usr/local/bin/agent-factory
           args:
             - serve
           env:
