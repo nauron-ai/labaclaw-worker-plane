@@ -57,3 +57,19 @@ Expected runtime secret keys:
 
 - `RUSTFS_ACCESS_KEY` or `LABACLAW_RUSTFS_ACCESS_KEY`
 - `RUSTFS_SECRET_KEY` or `LABACLAW_RUSTFS_SECRET_KEY`
+
+## Packaging
+
+Production packaging uses a single image that contains both entrypoints:
+
+- `/usr/local/bin/agent-factory`
+- `/usr/local/bin/agent-runner`
+
+Build and publish a versioned `linux/amd64` image to GHCR with:
+
+```bash
+scripts/build-and-push-ghcr.sh v0.1.9-0006
+```
+
+The Helm chart runs `agent-factory` explicitly, and spawned worker Deployments run
+`agent-runner` explicitly.

@@ -316,6 +316,7 @@ pub fn build_deployment_manifest(
                         "name": "agent-runner",
                         "image": spec.image,
                         "imagePullPolicy": "IfNotPresent",
+                        "command": ["/usr/local/bin/agent-runner"],
                         "env": env,
                     }]
                 }
@@ -606,6 +607,7 @@ mod tests {
         .unwrap();
         assert!(yaml.contains("LABACLAW_AGENT_SPEC_REF"));
         assert!(yaml.contains("LABACLAW_WORKER_PLANE_REDPANDA_BROKERS"));
+        assert!(yaml.contains("/usr/local/bin/agent-runner"));
         assert!(yaml.contains("envFrom"));
     }
 
