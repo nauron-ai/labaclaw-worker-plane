@@ -6,7 +6,7 @@ use kube::{Api, Client};
 use labaclaw_worker_plane::{
     build_dedicated_agent_spec, build_deployment_manifest, render_deployment_yaml,
     spawn_failed_event, spawned_event, AgentFactoryValues, SpawnAgentRequested,
-    COMMAND_TYPE_SPAWN_AGENT_REQUESTED, EVENT_TYPE_AGENT_SPAWN_FAILED, EVENT_TYPE_AGENT_SPAWNED,
+    COMMAND_TYPE_SPAWN_AGENT_REQUESTED, EVENT_TYPE_AGENT_SPAWNED, EVENT_TYPE_AGENT_SPAWN_FAILED,
     MESSAGE_TYPE_HEADER,
 };
 use rdkafka::config::ClientConfig;
@@ -20,7 +20,9 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "agent-factory")]
-#[command(about = "Consume worker-plane spawn commands and materialize dedicated agent Deployments")]
+#[command(
+    about = "Consume worker-plane spawn commands and materialize dedicated agent Deployments"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -213,7 +215,10 @@ fn runtime_config_from_env() -> Result<FactoryRuntimeConfig> {
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
             .collect(),
-        command_topic: env_var_with_default("LABACLAW_WORKER_PLANE_COMMAND_TOPIC", "agent.command.v1"),
+        command_topic: env_var_with_default(
+            "LABACLAW_WORKER_PLANE_COMMAND_TOPIC",
+            "agent.command.v1",
+        ),
         event_topic: env_var_with_default("LABACLAW_WORKER_PLANE_EVENT_TOPIC", "agent.event.v1"),
         heartbeat_topic: env_var_with_default(
             "LABACLAW_WORKER_PLANE_HEARTBEAT_TOPIC",
@@ -278,10 +283,7 @@ async fn publish_json<T: serde::Serialize>(
     Ok(())
 }
 
-fn header_value(
-    message: &rdkafka::message::BorrowedMessage<'_>,
-    key: &str,
-) -> Option<String> {
+fn header_value(message: &rdkafka::message::BorrowedMessage<'_>, key: &str) -> Option<String> {
     let headers = message.headers()?;
     for index in 0..headers.count() {
         let header = headers.get(index);

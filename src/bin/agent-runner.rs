@@ -6,8 +6,8 @@ use labaclaw_worker_plane::{
     ResumeAgentRequested, SpawnedBootstrapRequest, SuspendAgentRequested, TaskAssigned,
     TerminateAgentRequested, COMMAND_TYPE_RESUME_AGENT_REQUESTED,
     COMMAND_TYPE_SPAWN_AGENT_REQUESTED, COMMAND_TYPE_SUSPEND_AGENT_REQUESTED,
-    COMMAND_TYPE_TASK_ASSIGNED, COMMAND_TYPE_TERMINATE_AGENT_REQUESTED,
-    EVENT_TYPE_AGENT_COMPLETED, EVENT_TYPE_AGENT_HEARTBEAT, EVENT_TYPE_AGENT_PROGRESS_REPORTED,
+    COMMAND_TYPE_TASK_ASSIGNED, COMMAND_TYPE_TERMINATE_AGENT_REQUESTED, EVENT_TYPE_AGENT_COMPLETED,
+    EVENT_TYPE_AGENT_HEARTBEAT, EVENT_TYPE_AGENT_PROGRESS_REPORTED,
     EVENT_TYPE_AGENT_QUESTION_RAISED, EVENT_TYPE_AGENT_SPAWN_FAILED, EVENT_TYPE_AGENT_SUSPENDED,
     EVENT_TYPE_AGENT_TERMINATED, MESSAGE_TYPE_HEADER,
 };
@@ -230,8 +230,8 @@ async fn handle_command_message(
             Ok(false)
         }
         COMMAND_TYPE_RESUME_AGENT_REQUESTED => {
-            let request: ResumeAgentRequested =
-                serde_json::from_str(payload).context("Failed to deserialize ResumeAgentRequested")?;
+            let request: ResumeAgentRequested = serde_json::from_str(payload)
+                .context("Failed to deserialize ResumeAgentRequested")?;
             if request.agent_id != cfg.agent_id {
                 return Ok(false);
             }
@@ -241,7 +241,12 @@ async fn handle_command_message(
                 &cfg.event_topic,
                 EVENT_TYPE_AGENT_PROGRESS_REPORTED,
                 &cfg.agent_id,
-                &progress_event(&cfg.agent_id, None, "resumed", "Dedicated agent resumed by orchestrator"),
+                &progress_event(
+                    &cfg.agent_id,
+                    None,
+                    "resumed",
+                    "Dedicated agent resumed by orchestrator",
+                ),
             )
             .await?;
             Ok(false)
@@ -434,10 +439,7 @@ async fn publish_json<T: serde::Serialize>(
     Ok(())
 }
 
-fn header_value(
-    message: &rdkafka::message::BorrowedMessage<'_>,
-    key: &str,
-) -> Option<String> {
+fn header_value(message: &rdkafka::message::BorrowedMessage<'_>, key: &str) -> Option<String> {
     let headers = message.headers()?;
     for index in 0..headers.count() {
         let header = headers.get(index);

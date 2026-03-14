@@ -288,11 +288,7 @@ pub fn build_deployment_manifest(
         json!({"name": "LABACLAW_RUSTFS_REGION", "value": spec.rustfs_region}),
         json!({"name": "LABACLAW_RUNTIME_BACKEND", "value": "redpanda_k8s"}),
     ];
-    env.sort_by(|left, right| {
-        left["name"]
-            .as_str()
-            .cmp(&right["name"].as_str())
-    });
+    env.sort_by(|left, right| left["name"].as_str().cmp(&right["name"].as_str()));
 
     let mut spec_json = json!({
         "apiVersion": "apps/v1",
@@ -335,9 +331,17 @@ pub fn build_deployment_manifest(
     spec_json
 }
 
-pub fn render_deployment_yaml(spec: &DedicatedAgentDeploymentSpec, service_account: &str, runtime_secret_name: &str) -> Result<String> {
-    serde_yaml::to_string(&build_deployment_manifest(spec, service_account, runtime_secret_name))
-        .context("Failed to render Deployment manifest as YAML")
+pub fn render_deployment_yaml(
+    spec: &DedicatedAgentDeploymentSpec,
+    service_account: &str,
+    runtime_secret_name: &str,
+) -> Result<String> {
+    serde_yaml::to_string(&build_deployment_manifest(
+        spec,
+        service_account,
+        runtime_secret_name,
+    ))
+    .context("Failed to render Deployment manifest as YAML")
 }
 
 pub fn parse_s3_ref(reference: &str) -> Result<(String, String)> {
@@ -375,7 +379,8 @@ pub fn summarize_text_for_event(text: &str) -> String {
 
 pub fn execute_bootstrap_message(message: &str) -> BootstrapExecutionOutcome {
     let revenue = extract_named_number(message, "revenue");
-    let costs = extract_named_number(message, "costs").or_else(|| extract_named_number(message, "cost"));
+    let costs =
+        extract_named_number(message, "costs").or_else(|| extract_named_number(message, "cost"));
     if let (Some(revenue), Some(costs)) = (revenue, costs) {
         if revenue > 0.0 {
             let margin = ((revenue - costs) / revenue) * 100.0;
@@ -416,7 +421,11 @@ pub fn execute_bootstrap_message(message: &str) -> BootstrapExecutionOutcome {
     }
 }
 
-pub fn spawn_failed_event(agent_id: &str, request_id: Option<String>, error: impl Into<String>) -> AgentSpawnFailedEvent {
+pub fn spawn_failed_event(
+    agent_id: &str,
+    request_id: Option<String>,
+    error: impl Into<String>,
+) -> AgentSpawnFailedEvent {
     AgentSpawnFailedEvent {
         event_id: uuid::Uuid::new_v4().to_string(),
         agent_id: agent_id.to_string(),
@@ -442,7 +451,11 @@ pub fn progress_event(
     }
 }
 
-pub fn heartbeat_event(agent_id: &str, workload_name: &str, service_state: &str) -> AgentHeartbeatEvent {
+pub fn heartbeat_event(
+    agent_id: &str,
+    workload_name: &str,
+    service_state: &str,
+) -> AgentHeartbeatEvent {
     AgentHeartbeatEvent {
         event_id: uuid::Uuid::new_v4().to_string(),
         agent_id: agent_id.to_string(),
@@ -558,8 +571,11 @@ mod tests {
             event_id: "evt-1".into(),
             agent_id: "financial-analyst-1".into(),
             owner_agent_id: "orchestrator".into(),
-            spec_ref: "s3://laba-artifacts/labaclaw/specs/financial-analyst-1/v1/agent-spec.json".into(),
-            bootstrap_ref: "s3://laba-artifacts/labaclaw/bootstrap/financial-analyst-1/req-1/request.json".into(),
+            spec_ref: "s3://laba-artifacts/labaclaw/specs/financial-analyst-1/v1/agent-spec.json"
+                .into(),
+            bootstrap_ref:
+                "s3://laba-artifacts/labaclaw/bootstrap/financial-analyst-1/req-1/request.json"
+                    .into(),
             lifecycle_mode: "dedicated".into(),
             task_profile: "deep_reasoning".into(),
             requested_at: "2026-03-13T00:00:00Z".into(),
@@ -582,7 +598,12 @@ mod tests {
             rustfs_region: "us-east-1".into(),
         };
         let spec = build_dedicated_agent_spec(&request, &values);
-        let yaml = render_deployment_yaml(&spec, "labaclaw-worker-plane", "labaclaw-worker-plane-runtime").unwrap();
+        let yaml = render_deployment_yaml(
+            &spec,
+            "labaclaw-worker-plane",
+            "labaclaw-worker-plane-runtime",
+        )
+        .unwrap();
         assert!(yaml.contains("LABACLAW_AGENT_SPEC_REF"));
         assert!(yaml.contains("LABACLAW_WORKER_PLANE_REDPANDA_BROKERS"));
         assert!(yaml.contains("envFrom"));
