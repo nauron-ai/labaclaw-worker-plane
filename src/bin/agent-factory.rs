@@ -145,6 +145,37 @@ async fn handle_message(
         serde_json::from_str(payload).context("Failed to deserialize SpawnAgentRequested")?;
 
     let spec = build_dedicated_agent_spec(&request, &cfg.values);
+    if let Some(expected_worker_image) = request
+        .expected_worker_image
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if expected_worker_image != spec.image {
+            let event = spawn_failed_event(
+                &request.agent_id,
+                None,
+                format!(
+                    "Worker image mismatch for agent {}: orchestrator expected {}, factory resolved {}",
+                    request.agent_id, expected_worker_image, spec.image
+                ),
+            );
+            publish_json(
+                producer,
+                &cfg.values.event_topic,
+                EVENT_TYPE_AGENT_SPAWN_FAILED,
+                &request.agent_id,
+                &event,
+            )
+            .await?;
+            anyhow::bail!(
+                "Worker image mismatch for agent {}: expected {}, got {}",
+                request.agent_id,
+                expected_worker_image,
+                spec.image
+            );
+        }
+    }
     let manifest = build_deployment_manifest(
         &spec,
         &cfg.values.service_account,

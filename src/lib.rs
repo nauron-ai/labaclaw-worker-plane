@@ -26,6 +26,12 @@ pub struct SpawnAgentRequested {
     pub event_id: String,
     pub agent_id: String,
     pub owner_agent_id: String,
+    #[serde(default)]
+    pub recycle_family: String,
+    #[serde(default)]
+    pub compatibility_key: String,
+    #[serde(default)]
+    pub expected_worker_image: Option<String>,
     pub spec_ref: String,
     pub bootstrap_ref: String,
     pub lifecycle_mode: String,
@@ -121,6 +127,8 @@ pub struct DedicatedAgentDeploymentSpec {
     pub image: String,
     pub agent_id: String,
     pub owner_agent_id: String,
+    pub recycle_family: String,
+    pub compatibility_key: String,
     pub pack_id: Option<String>,
     pub spec_ref: String,
     pub bootstrap_ref: String,
@@ -261,6 +269,14 @@ pub fn deployment_name(agent_id: &str) -> String {
     }
 }
 
+fn shorten_label_value(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.len() <= 63 {
+        return trimmed.to_string();
+    }
+    trimmed[..63].trim_matches('-').to_string()
+}
+
 pub fn build_dedicated_agent_spec(
     request: &SpawnAgentRequested,
     values: &AgentFactoryValues,
@@ -276,6 +292,14 @@ pub fn build_dedicated_agent_spec(
                     "labaclaw/owner-agent-id".into(),
                     request.owner_agent_id.clone(),
                 ),
+                (
+                    "labaclaw/recycle-family".into(),
+                    shorten_label_value(&request.recycle_family),
+                ),
+                (
+                    "labaclaw/compatibility-key".into(),
+                    shorten_label_value(&request.compatibility_key),
+                ),
                 ("labaclaw/task-profile".into(), request.task_profile.clone()),
             ],
         },
@@ -285,6 +309,8 @@ pub fn build_dedicated_agent_spec(
         ),
         agent_id: request.agent_id.clone(),
         owner_agent_id: request.owner_agent_id.clone(),
+        recycle_family: request.recycle_family.clone(),
+        compatibility_key: request.compatibility_key.clone(),
         pack_id: None,
         spec_ref: request.spec_ref.clone(),
         bootstrap_ref: request.bootstrap_ref.clone(),
@@ -314,6 +340,8 @@ pub fn build_deployment_manifest(
     let mut env = vec![
         json!({"name": "LABACLAW_AGENT_ID", "value": spec.agent_id}),
         json!({"name": "LABACLAW_OWNER_AGENT_ID", "value": spec.owner_agent_id}),
+        json!({"name": "LABACLAW_RECYCLE_FAMILY", "value": spec.recycle_family}),
+        json!({"name": "LABACLAW_AGENT_COMPATIBILITY_KEY", "value": spec.compatibility_key}),
         json!({"name": "LABACLAW_AGENT_SPEC_REF", "value": spec.spec_ref}),
         json!({"name": "LABACLAW_BOOTSTRAP_REF", "value": spec.bootstrap_ref}),
         json!({"name": "LABACLAW_WORKER_PLANE_REDPANDA_BROKERS", "value": spec.redpanda_brokers.join(",")}),
@@ -1306,6 +1334,11 @@ mod tests {
             event_id: "evt-1".into(),
             agent_id: "financial-analyst-1".into(),
             owner_agent_id: "orchestrator".into(),
+            recycle_family: "ab12cd34ef56gh78".into(),
+            compatibility_key: "0123456789abcdef0123456789abcdef".into(),
+            expected_worker_image: Some(
+                "ghcr.io/nauron-ai/labaclaw-worker-plane:v0.1.9-0016".into(),
+            ),
             spec_ref: "s3://laba-artifacts/labaclaw/specs/financial-analyst-1/v1/agent-spec.json"
                 .into(),
             bootstrap_ref:
@@ -1340,6 +1373,8 @@ mod tests {
         )
         .unwrap();
         assert!(yaml.contains("LABACLAW_AGENT_SPEC_REF"));
+        assert!(yaml.contains("LABACLAW_AGENT_COMPATIBILITY_KEY"));
+        assert!(yaml.contains("labaclaw/recycle-family"));
         assert!(yaml.contains("LABACLAW_WORKER_PLANE_REDPANDA_BROKERS"));
         assert!(yaml.contains("/usr/local/bin/agent-runner"));
         assert!(yaml.contains("envFrom"));
