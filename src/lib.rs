@@ -801,11 +801,43 @@ fn slice_named_value(raw: &str) -> Option<String> {
     if let Some(idx) = raw.find(". ") {
         end = end.min(idx);
     }
+    if let Some(idx) = find_next_key_value_boundary(raw) {
+        end = end.min(idx);
+    }
     let value = raw[..end]
         .trim()
         .trim_end_matches(|ch: char| matches!(ch, ',' | ';' | ')' | '.'))
         .trim();
     (!value.is_empty()).then(|| value.to_string())
+}
+
+fn find_next_key_value_boundary(raw: &str) -> Option<usize> {
+    let bytes = raw.as_bytes();
+    for start in 0..bytes.len() {
+        if !bytes[start].is_ascii_whitespace() {
+            continue;
+        }
+        let mut idx = start;
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() || !is_assignment_key_char(bytes[idx]) {
+            continue;
+        }
+        let key_start = idx;
+        while idx < bytes.len() && is_assignment_key_char(bytes[idx]) {
+            idx += 1;
+        }
+        if idx == key_start || idx >= bytes.len() || bytes[idx] != b'=' {
+            continue;
+        }
+        return Some(start);
+    }
+    None
+}
+
+fn is_assignment_key_char(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-')
 }
 
 fn build_rust_calculator_outcome() -> Result<BootstrapExecutionOutcome> {
@@ -1430,6 +1462,10 @@ mod tests {
             .result_markdown
             .expect("trade setup should be present");
         assert!(result.contains("Trade setup for BTCUSDT"));
+        assert!(result.contains("on 4h (Binance)."));
+        assert!(result.contains("- Horizon: 3d"));
+        assert!(!result.contains("3d exchange=Binance"));
+        assert!(!result.contains("source=manual chart price=64000"));
         assert!(result.contains("Disclaimer"));
         assert_eq!(outcome.validation_status, "green");
         assert!(outcome.confidence >= 0.8);
