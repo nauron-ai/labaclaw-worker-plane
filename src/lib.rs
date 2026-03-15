@@ -764,15 +764,48 @@ fn extract_named_text(text: &str, label: &str) -> Option<String> {
         let marker = format!("{label}{separator}");
         if let Some(start) = lower.find(&marker) {
             let raw = &text[start + marker.len()..];
-            let value = raw
-                .split(['\n', ',', ';'])
-                .next()
-                .map(str::trim)
-                .filter(|candidate| !candidate.is_empty())?;
-            return Some(value.to_string());
+            let value = slice_named_value(raw)?;
+            return Some(value);
         }
     }
+
+    for (idx, _) in lower.match_indices(&label) {
+        let after_label = &lower[idx + label.len()..];
+        let Some(relative_separator) = after_label.find(['=', ':']).filter(|offset| *offset <= 24)
+        else {
+            continue;
+        };
+        let descriptor = &after_label[..relative_separator];
+        if descriptor.is_empty()
+            || !descriptor.chars().all(|ch| {
+                ch.is_ascii_whitespace() || ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
+            })
+        {
+            continue;
+        }
+        let raw = &text[idx + label.len() + relative_separator + 1..];
+        let value = slice_named_value(raw)?;
+        return Some(value);
+    }
+
     None
+}
+
+fn slice_named_value(raw: &str) -> Option<String> {
+    let mut end = raw.len();
+    for separator in ['\n', ',', ';'] {
+        if let Some(idx) = raw.find(separator) {
+            end = end.min(idx);
+        }
+    }
+    if let Some(idx) = raw.find(". ") {
+        end = end.min(idx);
+    }
+    let value = raw[..end]
+        .trim()
+        .trim_end_matches(|ch: char| matches!(ch, ',' | ';' | ')' | '.'))
+        .trim();
+    (!value.is_empty()).then(|| value.to_string())
 }
 
 fn build_rust_calculator_outcome() -> Result<BootstrapExecutionOutcome> {
@@ -1358,6 +1391,26 @@ mod tests {
             .question_summary
             .expect("question summary")
             .contains("calculator details"));
+    }
+
+    #[test]
+    fn requirements_analyst_accepts_human_readable_followup_labels() {
+        let outcome = execute_bootstrap_request(&SpawnedBootstrapRequest {
+            request_id: "req-analyst-followup".into(),
+            message: "For the calculator brief: target interface: CLI. Expression input format: single arithmetic expression as argv[1]. Delivery target: worker artifacts.".into(),
+            pack_id: Some("requirements_analyst".into()),
+            task_profile: Some("fast_conversational".into()),
+            max_history_messages: None,
+            max_tool_iterations: None,
+            compact_context: false,
+            created_at: "2026-03-15T00:00:00Z".into(),
+        });
+
+        assert_eq!(outcome.status, "completed");
+        let result = outcome.result_markdown.expect("brief should be present");
+        assert!(result.contains("Interface:\n- CLI"));
+        assert!(result.contains("Input:\n- single arithmetic expression as argv[1]"));
+        assert!(result.contains("Delivery:\n- worker artifacts"));
     }
 
     #[test]
