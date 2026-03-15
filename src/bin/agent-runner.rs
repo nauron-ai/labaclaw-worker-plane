@@ -1,15 +1,16 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use labaclaw_worker_plane::{
-    completed_event, execute_bootstrap_message, heartbeat_event, parse_s3_ref, progress_event,
+    completed_event, execute_bootstrap_request, heartbeat_event, parse_s3_ref, progress_event,
     question_event, spawn_failed_event, suspended_event, terminated_event, AgentCompleted,
     ResumeAgentRequested, SpawnedBootstrapRequest, SuspendAgentRequested, TaskAssigned,
-    TerminateAgentRequested, COMMAND_TYPE_RESUME_AGENT_REQUESTED,
-    COMMAND_TYPE_SPAWN_AGENT_REQUESTED, COMMAND_TYPE_SUSPEND_AGENT_REQUESTED,
-    COMMAND_TYPE_TASK_ASSIGNED, COMMAND_TYPE_TERMINATE_AGENT_REQUESTED, EVENT_TYPE_AGENT_COMPLETED,
-    EVENT_TYPE_AGENT_HEARTBEAT, EVENT_TYPE_AGENT_PROGRESS_REPORTED,
-    EVENT_TYPE_AGENT_QUESTION_RAISED, EVENT_TYPE_AGENT_SPAWN_FAILED, EVENT_TYPE_AGENT_SUSPENDED,
-    EVENT_TYPE_AGENT_TERMINATED, MESSAGE_TYPE_HEADER,
+    TerminateAgentRequested, WorkerArtifactReference, WorkerResultSidecar,
+    COMMAND_TYPE_RESUME_AGENT_REQUESTED, COMMAND_TYPE_SPAWN_AGENT_REQUESTED,
+    COMMAND_TYPE_SUSPEND_AGENT_REQUESTED, COMMAND_TYPE_TASK_ASSIGNED,
+    COMMAND_TYPE_TERMINATE_AGENT_REQUESTED, EVENT_TYPE_AGENT_COMPLETED, EVENT_TYPE_AGENT_HEARTBEAT,
+    EVENT_TYPE_AGENT_PROGRESS_REPORTED, EVENT_TYPE_AGENT_QUESTION_RAISED,
+    EVENT_TYPE_AGENT_SPAWN_FAILED, EVENT_TYPE_AGENT_SUSPENDED, EVENT_TYPE_AGENT_TERMINATED,
+    MESSAGE_TYPE_HEADER,
 };
 use object_store::aws::AmazonS3Builder;
 use object_store::path::Path as ObjectStorePath;
@@ -280,8 +281,29 @@ async fn execute_request(
     store: &dyn ObjectStore,
     request: &SpawnedBootstrapRequest,
 ) -> Result<()> {
-    let outcome = execute_bootstrap_message(&request.message);
+    let outcome = execute_bootstrap_request(request);
+    if let Some(error) = outcome.fatal_error.clone() {
+        let event = spawn_failed_event(&cfg.agent_id, Some(request.request_id.clone()), error);
+        publish_json(
+            producer,
+            &cfg.event_topic,
+            EVENT_TYPE_AGENT_SPAWN_FAILED,
+            &cfg.agent_id,
+            &event,
+        )
+        .await?;
+        return Ok(());
+    }
+
     if let Some(question_summary) = outcome.question_summary.clone() {
+        let question_ref = if let Some(question_markdown) = outcome.question_markdown.as_deref() {
+            let question_ref =
+                derive_question_ref(&cfg.bootstrap_ref, &cfg.agent_id, &request.request_id)?;
+            upload_bytes(store, &question_ref, question_markdown.as_bytes()).await?;
+            Some(question_ref)
+        } else {
+            None
+        };
         publish_json(
             producer,
             &cfg.event_topic,
@@ -290,20 +312,58 @@ async fn execute_request(
             &question_event(
                 &cfg.agent_id,
                 &request.request_id,
-                None,
+                question_ref,
                 Some(question_summary),
             ),
         )
         .await?;
     }
 
-    if let Some(result_markdown) = outcome.result_markdown {
+    if let Some(mut result_markdown) = outcome.result_markdown {
+        let artifact_refs = upload_generated_artifacts(
+            store,
+            &cfg.bootstrap_ref,
+            &cfg.agent_id,
+            &request.request_id,
+            &outcome.artifacts,
+        )
+        .await?;
+        if !artifact_refs.is_empty() {
+            result_markdown.push_str("\n\nArtifacts:\n");
+            for (name, reference) in &artifact_refs {
+                result_markdown.push_str(&format!("- {name}: {reference}\n"));
+            }
+        }
         let result_ref = derive_result_ref(&cfg.bootstrap_ref, &cfg.agent_id, &request.request_id)?;
         upload_bytes(store, &result_ref, result_markdown.as_bytes()).await?;
+        let result_json_ref =
+            derive_result_json_ref(&cfg.bootstrap_ref, &cfg.agent_id, &request.request_id)?;
+        let sidecar = WorkerResultSidecar {
+            status: outcome.status.clone(),
+            summary: outcome
+                .summary
+                .clone()
+                .unwrap_or_else(|| "Dedicated worker completed the request".into()),
+            questions: outcome.questions.clone(),
+            confidence: outcome.confidence,
+            validation_status: outcome.validation_status.clone(),
+            artifacts: artifact_refs
+                .iter()
+                .map(|(name, reference)| WorkerArtifactReference {
+                    name: name.clone(),
+                    reference: reference.clone(),
+                })
+                .collect(),
+            direct_write_recommendation: outcome.direct_write_recommendation,
+        };
+        let sidecar_bytes = serde_json::to_vec_pretty(&sidecar)
+            .context("Failed to serialize worker result sidecar")?;
+        upload_bytes(store, &result_json_ref, &sidecar_bytes).await?;
         let completion: AgentCompleted = completed_event(
             &cfg.agent_id,
             &request.request_id,
             result_ref,
+            Some(result_json_ref),
             outcome
                 .summary
                 .unwrap_or_else(|| "Dedicated worker completed the request".into()),
@@ -465,6 +525,94 @@ fn derive_result_ref(bootstrap_ref: &str, agent_id: &str, request_id: &str) -> R
         format!("results/{agent_id}/{request_id}/result.md")
     } else {
         format!("{prefix}/results/{agent_id}/{request_id}/result.md")
+    };
+    Ok(format!("s3://{bucket}/{key}"))
+}
+
+fn derive_result_json_ref(bootstrap_ref: &str, agent_id: &str, request_id: &str) -> Result<String> {
+    let (bucket, key) = parse_s3_ref(bootstrap_ref)?;
+    let prefix = key
+        .split("/bootstrap/")
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    let key = if prefix.is_empty() {
+        format!("results/{agent_id}/{request_id}/result.json")
+    } else {
+        format!("{prefix}/results/{agent_id}/{request_id}/result.json")
+    };
+    Ok(format!("s3://{bucket}/{key}"))
+}
+
+fn derive_question_ref(bootstrap_ref: &str, agent_id: &str, request_id: &str) -> Result<String> {
+    let (bucket, key) = parse_s3_ref(bootstrap_ref)?;
+    let prefix = key
+        .split("/bootstrap/")
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    let key = if prefix.is_empty() {
+        format!("questions/{agent_id}/{request_id}/question.md")
+    } else {
+        format!("{prefix}/questions/{agent_id}/{request_id}/question.md")
+    };
+    Ok(format!("s3://{bucket}/{key}"))
+}
+
+async fn upload_generated_artifacts(
+    store: &dyn ObjectStore,
+    bootstrap_ref: &str,
+    agent_id: &str,
+    request_id: &str,
+    artifacts: &[labaclaw_worker_plane::GeneratedArtifact],
+) -> Result<Vec<(String, String)>> {
+    let mut uploaded = Vec::new();
+    for artifact in artifacts {
+        let artifact_ref = derive_named_artifact_ref(
+            bootstrap_ref,
+            agent_id,
+            request_id,
+            &artifact.relative_path,
+        )?;
+        upload_bytes(store, &artifact_ref, &artifact.bytes).await?;
+        uploaded.push((artifact.relative_path.clone(), artifact_ref));
+    }
+    Ok(uploaded)
+}
+
+fn derive_named_artifact_ref(
+    bootstrap_ref: &str,
+    agent_id: &str,
+    request_id: &str,
+    relative_path: &str,
+) -> Result<String> {
+    let (bucket, key) = parse_s3_ref(bootstrap_ref)?;
+    let prefix = key
+        .split("/bootstrap/")
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches('/');
+    let normalized_path = relative_path
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .map(|segment| {
+            segment
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_') {
+                        ch
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("/");
+    let key = if prefix.is_empty() {
+        format!("artifacts/{agent_id}/{request_id}/{normalized_path}")
+    } else {
+        format!("{prefix}/artifacts/{agent_id}/{request_id}/{normalized_path}")
     };
     Ok(format!("s3://{bucket}/{key}"))
 }
